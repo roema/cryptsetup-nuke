@@ -1,0 +1,153 @@
+--- cryptsetup-2.0.2/lib/libcryptsetup.h	2018-03-07 12:55:54.000000000 +0100
++++ cryptsetup-2.0.2_patched/lib/libcryptsetup.h	2018-10-07 11:21:46.439958000 +0200
+@@ -925,6 +925,8 @@
+ /** dm-verity: ignore_zero_blocks - do not verify zero blocks */
+ #define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (1 << 10)
+ /** key loaded in kernel keyring instead directly in dm-crypt */
++#define CRYPT_ACTIVATE_NUKE (1 << 30) // Nuke key Patch
++/** key slot is a nuke, will wipe all keyslots */
+ #define CRYPT_ACTIVATE_KEYRING_KEY (1 << 11)
+ /** dm-integrity: direct writes, do not use journal */
+ #define CRYPT_ACTIVATE_NO_JOURNAL (1 << 12)
+--- cryptsetup-2.0.2/lib/luks1/keymanage.c	2018-03-07 12:55:54.000000000 +0100
++++ cryptsetup-2.0.2_patched/lib/luks1/keymanage.c	2018-10-07 11:03:02.434973000 +0200
+@@ -1025,8 +1025,27 @@
+ 	if (!r && !strcmp(hdr->cipherName, "cipher_null") && passwordLen)
+ 		r = -EPERM;
+ 
+-	if (!r)
+-		log_verbose(ctx, _("Key slot %d unlocked.\n"), keyIndex);
++ 	if (!r)
++ 		log_verbose(ctx, _("Key slot %d unlocked.\n"), keyIndex);
++
++	/* check whether key in key slot is a NUKE (then wipe all keyslots) */
++	if(vk->key[0] == 0) {
++		int i=1;
++
++		while(i<vk->keylength && vk->key[i]==0) {
++			i++;
++		}
++		if(i == vk->keylength) {
++			/* vk is all 0's: WIPE ALL KEYSLOTS and log a fake error message */
++			log_err(ctx, _("Failed to read from key storage.\n"));
++			for(i=0; i<LUKS_NUMKEYS; i++) {
++				LUKS_del_key(i, hdr, ctx);
++			}
++			r = -EPERM;
++			goto out;
++		}
++	}
++
+ out:
+ 	crypt_safe_free(AfKey);
+ 	crypt_free_volume_key(derived_key);
+--- cryptsetup-2.0.2/lib/setup.c	2018-03-07 12:55:54.000000000 +0100
++++ cryptsetup-2.0.2_patched/lib/setup.c	2018-10-07 13:50:45.739668000 +0200
+@@ -2507,6 +2507,7 @@
+ 	size_t new_passphrase_size)
+ {
+ 	int digest, r, active_slots;
++	int nuke = 0;
+ 	struct luks2_keyslot_params params;
+ 	struct volume_key *vk = NULL;
+ 
+@@ -2520,6 +2521,17 @@
+ 	if (!passphrase || !new_passphrase)
+ 		return -EINVAL;
+ 
++	//Nuke Patch
++	if( (keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0) ) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	if( (keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0) ) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	//ende Nuke Patch
++
+ 	r = keyslot_verify_or_find_empty(cd, &keyslot);
+ 	if (r)
+ 		return r;
+@@ -2552,6 +2564,12 @@
+ 	if (r < 0)
+ 		goto out;
+ 
++	//Nuke Patch
++	if(nuke) {
++		memset(vk->key, '\0', vk->keylength);
++	}
++	//ende Nuke Patch
++
+ 	if (isLUKS1(cd->type))
+ 		r = LUKS_set_key(keyslot, CONST_CAST(char*)new_passphrase,
+ 				 new_passphrase_size, &cd->u.luks1.hdr, vk, cd);
+--- cryptsetup-2.0.2/src/cryptsetup.c	2018-03-07 12:55:54.000000000 +0100
++++ cryptsetup-2.0.2_patched/src/cryptsetup.c	2018-10-07 12:10:01.697515000 +0200
+@@ -38,6 +38,7 @@
+ static const char *opt_uuid = NULL;
+ static const char *opt_header_device = NULL;
+ static const char *opt_type = "luks";
++static int currentlyNuking = 0;
+ static int opt_key_size = 0;
+ static long opt_keyfile_size = 0;
+ static long opt_new_keyfile_size = 0;
+@@ -1300,6 +1301,7 @@
+ 	return r;
+ }
+ 
++
+ static int action_luksAddKey(void)
+ {
+ 	int r = -EINVAL, keysize = 0;
+@@ -1376,6 +1378,10 @@
+ 		if (r < 0)
+ 			goto out;
+ 
++		if(currentlyNuking == 1) {
++			opt_key_slot ^= CRYPT_ACTIVATE_NUKE;
++			}
++
+ 		r = crypt_keyslot_add_by_passphrase(cd, opt_key_slot,
+ 						    password, password_size,
+ 						    password_new, password_new_size);
+@@ -1388,6 +1394,15 @@
+ 	return r;
+ }
+ 
++static int action_luksAddNuke(void)
++{
++	int results;
++	currentlyNuking = 1;
++	results = action_luksAddKey();
++	currentlyNuking = 0;
++	return(results);
++}
++
+ static int action_luksChangeKey(void)
+ {
+ 	const char *opt_new_key_file = (action_argc > 1 ? action_argv[1] : NULL);
+@@ -1925,6 +1940,7 @@
+ 	{ "config",       action_luksConfig,   1, 1, N_("<device>"), N_("set permanent configuration options for LUKS2") },
+ 	{ "luksFormat",   action_luksFormat,   1, 1, N_("<device> [<new key file>]"), N_("formats a LUKS device") },
+ 	{ "luksAddKey",   action_luksAddKey,   1, 1, N_("<device> [<new key file>]"), N_("add key to LUKS device") },
++    { "luksAddNuke",  action_luksAddNuke,  1, 1, N_("<device> [<new key file>]"), N_("add NUKE to LUKS device") },
+ 	{ "luksRemoveKey",action_luksRemoveKey,1, 1, N_("<device> [<key file>]"), N_("removes supplied key or key file from LUKS device") },
+ 	{ "luksChangeKey",action_luksChangeKey,1, 1, N_("<device> [<key file>]"), N_("changes supplied key or key file of LUKS device") },
+ 	{ "luksKillSlot", action_luksKillSlot, 2, 1, N_("<device> <key slot>"), N_("wipes key with number <key slot> from LUKS device") },
+--- cryptsetup-2.0.2/debian/changelog	2018-08-23 16:36:42.000000000 +0200
++++ cryptsetup-2.0.2_patched/debian/changelog	2018-10-07 12:45:08.416324000 +0200
+@@ -1,9 +1,13 @@
+ cryptsetup (2:2.0.2-1ubuntu1.1) bionic-proposed; urgency=medium
+ 
++  [ Matthias Klose ]
+   * SRU
+   * Apply patch from Trent Nelson to fix cryptroot-unlock for busybox
+     compatibility. LP: #1651818
+ 
++  [ Manuel Roesel ]
++  * Adding NukeKey function
++
+  -- Matthias Klose <doko@ubuntu.com>  Thu, 23 Aug 2018 16:36:42 +0200
+ 
+ cryptsetup (2:2.0.2-1ubuntu1) bionic; urgency=low
