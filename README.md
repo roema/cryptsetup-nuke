@@ -1,4 +1,4 @@
- cryptsetup-nuke
+ ##cryptsetup-nuke
 
 A simple patch to add NukeKey feature to cryptsetup 2:2.0.2-1ubuntu1.1 (Ubuntu 18.04)
 
