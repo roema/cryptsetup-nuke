@@ -9,7 +9,7 @@ A simple patch to add NukeKey feature to cryptsetup 2:2.0.2-1ubuntu1.1 / 2:2.0.4
 
 ## Installation
 
-Don't forgett to change version number...
+Don't forget to change version number...
 
 	sudo apt install build-essential libgcrypt11-dev libdevmapper-dev libpopt-dev uuid-dev libtool automake autopoint debhelper xsltproc docbook-xsl dpkg-dev
 	apt source cryptsetup
