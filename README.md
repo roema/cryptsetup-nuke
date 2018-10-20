@@ -1,6 +1,6 @@
  ## cryptsetup-nuke
 
-A simple patch to add NukeKey feature to cryptsetup 2:2.0.4-2ubuntu2 (Ubuntu 18.10)
+A simple patch to add NukeKey feature to cryptsetup 2:2.0.2-1ubuntu1.1 / 2:2.0.4-2ubuntu2 (Ubuntu 18.04 / 18.10)
 
 
 ## Requirements
@@ -8,6 +8,8 @@ A simple patch to add NukeKey feature to cryptsetup 2:2.0.4-2ubuntu2 (Ubuntu 18.
 * build-essential libgcrypt11-dev libdevmapper-dev libpopt-dev uuid-dev libtool automake autopoint debhelper xsltproc docbook-xsl dpkg-dev
 
 ## Installation
+
+Don't forgett to change version number...
 
 	sudo apt install build-essential libgcrypt11-dev libdevmapper-dev libpopt-dev uuid-dev libtool automake autopoint debhelper xsltproc docbook-xsl dpkg-dev
 	apt source cryptsetup
