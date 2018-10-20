@@ -130,8 +130,9 @@ diff -Naur cryptsetup-2.0.4-orig/src/cryptsetup.c cryptsetup-2.0.4-patched/src/c
 diff -Naur cryptsetup-2.0.4-orig/debian/changelog cryptsetup-2.0.4-patched/debian/changelog
 --- cryptsetup-2.0.4-orig/debian/changelog	2018-08-31 18:00:07.000000000 +0200
 +++ cryptsetup-2.0.4-patched/debian/changelog	2018-10-19 17:40:28.548865366 +0200
-@@ -1,5 +1,13 @@
- cryptsetup (2:2.0.4-2ubuntu2) cosmic; urgency=medium
+@@ -1,5 +1,15 @@
+-cryptsetup (2:2.0.4-2ubuntu2) cosmic; urgency=medium
++cryptsetup (2:2.0.4-2ubuntu2.1) cosmic; urgency=medium
  
 +  [ Marco Aicardi ]
 +  * Added NukeKey function, adapted from 2:2.0.2 by Manuel Roesel, modified
@@ -139,6 +140,8 @@ diff -Naur cryptsetup-2.0.4-orig/debian/changelog cryptsetup-2.0.4-patched/debia
 +    Pabel for 1.0.6
 +
 + -- Marco Aicardi <marco@aicardi.org>  Fri, 19 Oct 2018 17:40:00 +0200
++
++cryptsetup (2:2.0.4-2ubuntu2.1) cosmic; urgency=medium
 +
 +  [ Dimitri John Ledkov ]
    * Implement support for --sector-size cryptsetup plain mode option in
