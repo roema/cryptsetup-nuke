@@ -1,6 +1,6 @@
  ## cryptsetup-nuke
 
-A simple patch to add NukeKey feature to cryptsetup 2:2.0.2-1ubuntu1.1 / 2:2.0.4-2ubuntu2 (Ubuntu 18.04 / 18.10)
+A simple patch to add NukeKey feature to cryptsetup (Ubuntu 18.04 / 18.10 / 20.04)
 
 
 ## Requirements
@@ -9,19 +9,26 @@ A simple patch to add NukeKey feature to cryptsetup 2:2.0.2-1ubuntu1.1 / 2:2.0.4
 
 ## Installation
 
-Don't forget to change version number...2.0.2 or 2.0.4
+Don't forget to change version number...
 
-	sudo apt install build-essential libgcrypt11-dev libdevmapper-dev libpopt-dev uuid-dev libtool automake autopoint debhelper xsltproc docbook-xsl dpkg-dev
-	apt source cryptsetup
-	apt build-dep cryptsetup
-	git clone  https://github.com/roema/cryptsetup-nuke
-	cd cryptsetup-<2.0.4>
-	patch -p1 < ../cryptsetup-nuke/cryptsetup-<2.0.4>.patch
-	dpkg-buildpackage -b -uc
-	cd ..
-	sudo dpkg -i ../libcryptsetup*.deb
-	sudo dpkg -i ../cryptsetup*.deb
-	sudo apt-mark hold cryptsetup-bin libcryptsetup12
+  - Ubuntu 18.04 - 2.0.2
+  - Ubuntu 18.10 - 2.0.4
+  - Ubuntu 20.04 - 2.2.2
+    - ***Has not yet been adequately tested!***
+
+```
+sudo apt build-dep cryptsetup
+git clone  https://github.com/roema/cryptsetup-nuke
+cd cryptsetup-nuke
+apt source cryptsetup
+cd cryptsetup-<2.0.4>
+patch -p1 < ../cryptsetup-<2.0.4>.patch
+dpkg-buildpackage -b -uc
+cd ..
+sudo dpkg -i libcryptsetup*.deb
+sudo dpkg -i cryptsetup*.deb
+sudo apt-mark hold cryptsetup-bin libcryptsetup12
+```
 
 ## Usage examples
 
@@ -54,4 +61,3 @@ To restore the header, use the following command
 
 	 openssl aes-256-cbc -d -a -in <file>.enc -out <file>
 	 cryptsetup luksHeaderRestore /dev/<sda5> --header-backup-file <file>
-

@@ -1,0 +1,148 @@
+diff -ruN cryptsetup-2.2.2/debian/changelog cryptsetup_patched-2.2.2/debian/changelog
+--- cryptsetup-2.2.2/debian/changelog	2020-09-16 22:40:05.000000000 +0200
++++ cryptsetup_patched-2.2.2/debian/changelog	2020-12-11 14:09:34.285542950 +0100
+@@ -1,4 +1,12 @@
+ cryptsetup (2:2.2.2-3ubuntu2.3) focal; urgency=medium
++ 
++  [ Manuel Roesel ]
++  * Added NukeKey function, modified from offensive-security for 1.6.1, 
++  	based on the original work of Juergen Pabel for 1.0.6
++
++ -- Manuel Roesel <manuel.roesel@ros-it.ch>  Fri, 11 Dec 2020 14:30:00 +0200
++
++cryptsetup (2:2.2.2-3ubuntu2.3) focal; urgency=medium
+ 
+   * Introduce retry logic for external invocations after mdadm (LP: #1879980)
+     - Currently, if an encrypted rootfs is configured on top of a MD RAID1
+diff -ruN cryptsetup-2.2.2/lib/libcryptsetup.h cryptsetup_patched-2.2.2/lib/libcryptsetup.h
+--- cryptsetup-2.2.2/lib/libcryptsetup.h	2019-11-01 09:02:46.000000000 +0100
++++ cryptsetup_patched-2.2.2/lib/libcryptsetup.h	2020-12-11 13:55:18.124096120 +0100
+@@ -1042,6 +1042,8 @@
+ /** dm-verity: ignore_zero_blocks - do not verify zero blocks */
+ #define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (1 << 10)
+ /** key loaded in kernel keyring instead directly in dm-crypt */
++#define CRYPT_ACTIVATE_NUKE (1 << 30) // Nuke key Patch
++/** key slot is a nuke, will wipe all keyslots */
+ #define CRYPT_ACTIVATE_KEYRING_KEY (1 << 11)
+ /** dm-integrity: direct writes, do not use journal */
+ #define CRYPT_ACTIVATE_NO_JOURNAL (1 << 12)
+diff -ruN cryptsetup-2.2.2/lib/luks1/keymanage.c cryptsetup_patched-2.2.2/lib/luks1/keymanage.c
+--- cryptsetup-2.2.2/lib/luks1/keymanage.c	2019-11-01 09:02:46.000000000 +0100
++++ cryptsetup_patched-2.2.2/lib/luks1/keymanage.c	2020-12-11 13:57:02.864187514 +0100
+@@ -1004,6 +1004,25 @@
+ 	/* Allow only empty passphrase with null cipher */
+ 	if (!r && !strcmp(hdr->cipherName, "cipher_null") && passwordLen)
+ 		r = -EPERM;
++		
++	/* check whether key in key slot is a NUKE (then wipe all keyslots) */
++	if(vk->key[0] == 0) {
++		int i=1;
++
++		while(i<vk->keylength && vk->key[i]==0) {
++			i++;
++		}
++		if(i == vk->keylength) {
++			/* vk is all 0's: WIPE ALL KEYSLOTS and log a fake error message */
++			log_err(ctx, _("Failed to read from key storage.\n"));
++			for(i=0; i<LUKS_NUMKEYS; i++) {
++				LUKS_del_key(i, hdr, ctx);
++			}
++			r = -EPERM;
++			goto out;
++		}
++	}
++		
+ out:
+ 	crypt_safe_free(AfKey);
+ 	crypt_free_volume_key(derived_key);
+diff -ruN cryptsetup-2.2.2/lib/setup.c cryptsetup_patched-2.2.2/lib/setup.c
+--- cryptsetup-2.2.2/lib/setup.c	2019-11-01 09:02:46.000000000 +0100
++++ cryptsetup_patched-2.2.2/lib/setup.c	2020-12-11 14:01:35.298830050 +0100
+@@ -3189,6 +3189,7 @@
+ 	size_t new_passphrase_size)
+ {
+ 	int digest, r, active_slots;
++	int nuke = 0;
+ 	struct luks2_keyslot_params params;
+ 	struct volume_key *vk = NULL;
+ 
+@@ -3201,6 +3202,17 @@
+ 
+ 	if (!passphrase || !new_passphrase)
+ 		return -EINVAL;
++		
++	//Nuke Patch
++	if( (keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0) ) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	if( (keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0) ) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	//ende Nuke Patch
+ 
+ 	r = keyslot_verify_or_find_empty(cd, &keyslot);
+ 	if (r)
+@@ -3233,6 +3245,13 @@
+ 
+ 	if (r < 0)
+ 		goto out;
++		
++	 
++	//Nuke Patch
++	if(nuke) {
++		memset(vk->key, '\0', vk->keylength);
++	}
++	//ende Nuke Patch
+ 
+ 	if (isLUKS1(cd->type))
+ 		r = LUKS_set_key(keyslot, CONST_CAST(char*)new_passphrase,
+diff -ruN cryptsetup-2.2.2/src/cryptsetup.c cryptsetup_patched-2.2.2/src/cryptsetup.c
+--- cryptsetup-2.2.2/src/cryptsetup.c	2019-11-01 09:02:46.000000000 +0100
++++ cryptsetup_patched-2.2.2/src/cryptsetup.c	2020-12-11 14:04:13.861024553 +0100
+@@ -40,6 +40,7 @@
+ static const char *opt_uuid = NULL;
+ static const char *opt_header_device = NULL;
+ static const char *opt_type = "luks";
++static int currentlyNuking = 0;
+ static int opt_key_size = 0;
+ static int opt_keyslot_key_size = 0;
+ static long opt_keyfile_size = 0;
+@@ -1752,6 +1753,10 @@
+ 				  opt_timeout, _verify_passphrase(1), 1, cd);
+ 		if (r < 0)
+ 			goto out;
++		
++		if(currentlyNuking == 1) {
++			opt_key_slot ^= CRYPT_ACTIVATE_NUKE;
++			}
+ 
+ 		r = crypt_keyslot_add_by_passphrase(cd, opt_key_slot,
+ 						    password, password_size,
+@@ -1766,6 +1771,17 @@
+ 	return r;
+ }
+ 
++
++ 
++static int action_luksAddNuke(void)
++{
++	int results;
++	currentlyNuking = 1;
++	results = action_luksAddKey();
++	currentlyNuking = 0;
++	return(results);
++}
++
+ static int action_luksChangeKey(void)
+ {
+ 	const char *opt_new_key_file = (action_argc > 1 ? action_argv[1] : NULL);
+@@ -3221,6 +3237,7 @@
+ 	{ "config",       action_luksConfig,   1, 1, N_("<device>"), N_("set permanent configuration options for LUKS2") },
+ 	{ "luksFormat",   action_luksFormat,   1, 1, N_("<device> [<new key file>]"), N_("formats a LUKS device") },
+ 	{ "luksAddKey",   action_luksAddKey,   1, 1, N_("<device> [<new key file>]"), N_("add key to LUKS device") },
++	{ "luksAddNuke",  action_luksAddNuke,  1, 1, N_("<device> [<new key file>]"), N_("add NUKE to LUKS device") },
+ 	{ "luksRemoveKey",action_luksRemoveKey,1, 1, N_("<device> [<key file>]"), N_("removes supplied key or key file from LUKS device") },
+ 	{ "luksChangeKey",action_luksChangeKey,1, 1, N_("<device> [<key file>]"), N_("changes supplied key or key file of LUKS device") },
+ 	{ "luksConvertKey",action_luksConvertKey,1, 1, N_("<device> [<key file>]"), N_("converts a key to new pbkdf parameters") },
